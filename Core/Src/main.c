@@ -60,13 +60,7 @@ TIM_HandleTypeDef htim17;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-volatile uint8_t buf;
 
-void HAL_UART_RxCpltCallback( UART_HandleTypeDef *huart )
-{
-	HAL_UART_Transmit( huart, &buf, 1, 20 );
-	HAL_UART_Receive_IT( huart, &buf, 1 );
-}
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -152,21 +146,17 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   HAL_UART_Init( &huart2 );
-  HAL_UART_Receive_IT( &huart2, &buf, 1);
+  HAL_ADC_Init(&hadc1);
 
-  uint8_t data[256];
-  uint32_t crc_sum;
+  uint32_t val = 0;
+  uint8_t text[8];
+
   while (1)
   {
-	  if( HAL_GPIO_ReadPin( ENC_BT_GPIO_Port, ENC_BT_Pin) == 0 )
-	  {
-		  sprintf( data, "0:%u,%u,%2.2f,%2.2f,%2.2f,%2.2f,%2.2f:", 0, 1, 2.3, 3.4, 4.5, 5.6, 6.7 );
-		  crc_sum = crc32(data);
-		  sprintf( data, "%s%u\n", data, crc_sum);
-		  HAL_UART_Transmit(&huart2, data, strlen(data), 50);
-		  while( HAL_GPIO_ReadPin( ENC_BT_GPIO_Port, ENC_BT_Pin) == 0 );
-	  }
-	  //BSP_LCD_GLASS_DisplayString("test");
+	  HAL_ADC_Start(&hadc1);
+	  val = HAL_ADC_GetValue(&hadc1);
+	  sprintf( (char*)text, "%4d", val);
+	  BSP_LCD_GLASS_DisplayString(text);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -187,11 +177,12 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_LSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = 1;
   RCC_OscInitStruct.PLL.PLLN = 20;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
@@ -210,7 +201,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
   {
     Error_Handler();
   }
@@ -222,13 +213,13 @@ void SystemClock_Config(void)
   PeriphClkInit.Sai1ClockSelection = RCC_SAI1CLKSOURCE_PLLSAI1;
   PeriphClkInit.AdcClockSelection = RCC_ADCCLKSOURCE_PLLSAI2;
   PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
-  PeriphClkInit.PLLSAI2.PLLSAI2Source = RCC_PLLSOURCE_HSE;
+  PeriphClkInit.PLLSAI2.PLLSAI2Source = RCC_PLLSOURCE_HSI;
   PeriphClkInit.PLLSAI2.PLLSAI2M = 1;
   PeriphClkInit.PLLSAI2.PLLSAI2N = 8;
   PeriphClkInit.PLLSAI2.PLLSAI2P = RCC_PLLP_DIV7;
   PeriphClkInit.PLLSAI2.PLLSAI2R = RCC_PLLR_DIV2;
   PeriphClkInit.PLLSAI2.PLLSAI2ClockOut = RCC_PLLSAI2_ADC2CLK;
-  PeriphClkInit.PLLSAI1.PLLSAI1Source = RCC_PLLSOURCE_HSE;
+  PeriphClkInit.PLLSAI1.PLLSAI1Source = RCC_PLLSOURCE_HSI;
   PeriphClkInit.PLLSAI1.PLLSAI1M = 1;
   PeriphClkInit.PLLSAI1.PLLSAI1N = 12;
   PeriphClkInit.PLLSAI1.PLLSAI1P = RCC_PLLP_DIV7;
@@ -327,7 +318,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.Timing = 0x00909BEB;
+  hi2c2.Init.Timing = 0x10909CEC;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
