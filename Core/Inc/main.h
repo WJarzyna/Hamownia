@@ -104,10 +104,12 @@ void Error_Handler(void);
 #define SEG2_GPIO_Port GPIOB
 #define ENC_1_Pin GPIO_PIN_2
 #define ENC_1_GPIO_Port GPIOB
+#define ENC_1_EXTI_IRQn EXTI2_IRQn
 #define AUDIO_DIN_Pin GPIO_PIN_7
 #define AUDIO_DIN_GPIO_Port GPIOE
 #define ENC_2_Pin GPIO_PIN_8
 #define ENC_2_GPIO_Port GPIOE
+#define ENC_2_EXTI_IRQn EXTI9_5_IRQn
 #define AUDIO_CLK_Pin GPIO_PIN_9
 #define AUDIO_CLK_GPIO_Port GPIOE
 #define QSPI_CLK_Pin GPIO_PIN_10
@@ -176,12 +178,11 @@ void Error_Handler(void);
 #define OTG_FS_OverCurrent_GPIO_Port GPIOC
 #define OTG_FS_VBUS_Pin GPIO_PIN_11
 #define OTG_FS_VBUS_GPIO_Port GPIOC
-#define ENC_BUTTON_Pin GPIO_PIN_0
-#define ENC_BUTTON_GPIO_Port GPIOD
+#define ENC_BT_Pin GPIO_PIN_0
+#define ENC_BT_GPIO_Port GPIOD
+#define ENC_BT_EXTI_IRQn EXTI0_IRQn
 #define MEMS_SCK_Pin GPIO_PIN_1
 #define MEMS_SCK_GPIO_Port GPIOD
-#define GYRO_INT1_Pin GPIO_PIN_2
-#define GYRO_INT1_GPIO_Port GPIOD
 #define MEMS_MISO_Pin GPIO_PIN_3
 #define MEMS_MISO_GPIO_Port GPIOD
 #define MEMS_MOSI_Pin GPIO_PIN_4
@@ -202,8 +203,6 @@ void Error_Handler(void);
 #define SPEED_IN_GPIO_Port GPIOB
 #define ROTOR_PWM_Pin GPIO_PIN_7
 #define ROTOR_PWM_GPIO_Port GPIOB
-#define GYRO_INT2_Pin GPIO_PIN_8
-#define GYRO_INT2_GPIO_Port GPIOB
 #define COM3_Pin GPIO_PIN_9
 #define COM3_GPIO_Port GPIOB
 #define XL_CS_Pin GPIO_PIN_0

@@ -22,7 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,7 +60,13 @@ TIM_HandleTypeDef htim17;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+volatile uint8_t buf;
 
+void HAL_UART_RxCpltCallback( UART_HandleTypeDef *huart )
+{
+	HAL_UART_Transmit( huart, &buf, 1, 20 );
+	HAL_UART_Receive_IT( huart, &buf, 1 );
+}
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -80,7 +87,24 @@ static void MX_TIM17_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+uint32_t crc32( uint8_t* data )
+{
+   int j;
+   uint32_t checksum = 0xFFFFFFFF, mask;
+   uint8_t byte;
 
+   for( unsigned i = 0; data[i] != '\0'; ++i )
+   {
+      byte = data[i];
+      checksum = checksum ^ byte;
+      for (j = 7; j >= 0; --j)
+      {
+         mask = -(checksum & 1);
+         checksum = (checksum >> 1) ^ (0xEDB88320 & mask);
+      }
+   }
+   return ~checksum;
+}
 /* USER CODE END 0 */
 
 /**
@@ -121,30 +145,28 @@ int main(void)
   MX_TIM4_Init();
   MX_TIM17_Init();
   /* USER CODE BEGIN 2 */
-  //HAL_LCD_Init(&hlcd);
   BSP_LCD_GLASS_Init();
   BSP_LCD_GLASS_Clear();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  HAL_UART_Init( &huart2 );
+  HAL_UART_Receive_IT( &huart2, &buf, 1);
+
+  uint8_t data[256];
+  uint32_t crc_sum;
   while (1)
   {
-	  if( HAL_GPIO_ReadPin(ENC_BUTTON_GPIO_Port, ENC_BUTTON_Pin) == 0 ) BSP_LCD_GLASS_Clear();
-	  if( HAL_GPIO_ReadPin(ENC_1_GPIO_Port,ENC_1_Pin) == 0 )
+	  if( HAL_GPIO_ReadPin( ENC_BT_GPIO_Port, ENC_BT_Pin) == 0 )
 	  {
-		  while( HAL_GPIO_ReadPin(ENC_2_GPIO_Port,ENC_2_Pin) == 1 );
-		  BSP_LCD_GLASS_DisplayString("Lewo ");
-		  while( HAL_GPIO_ReadPin(ENC_2_GPIO_Port,ENC_2_Pin) == 0 );
-		  HAL_Delay(100);
+		  sprintf( data, "0:%u,%u,%2.2f,%2.2f,%2.2f,%2.2f,%2.2f:", 0, 1, 2.3, 3.4, 4.5, 5.6, 6.7 );
+		  crc_sum = crc32(data);
+		  sprintf( data, "%s%u\n", data, crc_sum);
+		  HAL_UART_Transmit(&huart2, data, strlen(data), 50);
+		  while( HAL_GPIO_ReadPin( ENC_BT_GPIO_Port, ENC_BT_Pin) == 0 );
 	  }
-	  if( HAL_GPIO_ReadPin(ENC_2_GPIO_Port,ENC_2_Pin) == 0 )
-	  	  {
-	  		  while( HAL_GPIO_ReadPin(ENC_1_GPIO_Port,ENC_1_Pin) == 1 );
-	  		  BSP_LCD_GLASS_DisplayString("Prawo");
-	  		  while( HAL_GPIO_ReadPin(ENC_1_GPIO_Port,ENC_1_Pin) == 0 );
-	  		  HAL_Delay(100);
-	  	  }
+	  //BSP_LCD_GLASS_DisplayString("test");
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -647,7 +669,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
+  huart2.Init.BaudRate = 57600;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
@@ -725,13 +747,13 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : ENC_1_Pin */
   GPIO_InitStruct.Pin = ENC_1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(ENC_1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : ENC_2_Pin */
   GPIO_InitStruct.Pin = ENC_2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(ENC_2_GPIO_Port, &GPIO_InitStruct);
 
@@ -750,17 +772,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF10_OTG_FS;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : ENC_BUTTON_Pin */
-  GPIO_InitStruct.Pin = ENC_BUTTON_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(ENC_BUTTON_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : GYRO_INT1_Pin */
-  GPIO_InitStruct.Pin = GYRO_INT1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_EVT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GYRO_INT1_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pin : ENC_BT_Pin */
+  GPIO_InitStruct.Pin = ENC_BT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(ENC_BT_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : GYRO_CS_Pin */
   GPIO_InitStruct.Pin = GYRO_CS_Pin;
@@ -776,12 +792,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(M3V3_REG_ON_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : GYRO_INT2_Pin */
-  GPIO_InitStruct.Pin = GYRO_INT2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_EVT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GYRO_INT2_GPIO_Port, &GPIO_InitStruct);
-
   /*Configure GPIO pin : XL_CS_Pin */
   GPIO_InitStruct.Pin = XL_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -794,6 +804,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_EVT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(XL_INT_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
 }
 
