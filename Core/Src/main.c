@@ -99,6 +99,21 @@ uint32_t crc32( uint8_t* data )
    }
    return ~checksum;
 }
+
+void set_ADC_channel( ADC_HandleTypeDef *hadc, uint32_t channel )
+{
+  ADC_ChannelConfTypeDef c_config;
+  c_config.Channel = channel;
+  c_config.Rank = ADC_REGULAR_RANK_1;
+  c_config.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+
+  if (HAL_ADC_ConfigChannel(hadc, &c_config) != HAL_OK)
+    {
+     BSP_LCD_GLASS_Clear();
+     BSP_LCD_GLASS_DisplayString("Error");
+     while(1);
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -150,12 +165,24 @@ int main(void)
 
   uint32_t val = 0;
   uint8_t text[8];
+  uint32_t channels[5] = { ADC_CHANNEL_5, ADC_CHANNEL_6, ADC_CHANNEL_7, ADC_CHANNEL_8, ADC_CHANNEL_10};
+  uint8_t channel = 0;
 
   while (1)
   {
+	  if( HAL_GPIO_ReadPin(ENC_BT_GPIO_Port, ENC_BT_Pin) == 0 )
+	  {
+		  ++channel;
+		  if( channel > 4 ) channel = 0;
+		  set_ADC_channel(&hadc1, channels[channel]);
+		  while( HAL_GPIO_ReadPin(ENC_BT_GPIO_Port, ENC_BT_Pin) == 0 );
+	  }
+
+
 	  HAL_ADC_Start(&hadc1);
+	  while(HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK);
 	  val = HAL_ADC_GetValue(&hadc1);
-	  sprintf( (char*)text, "%4d", val);
+	  sprintf( (char*)text, "%1.3f%1d", 3.3*((float)val/4096.0), channel+5);
 	  BSP_LCD_GLASS_DisplayString(text);
     /* USER CODE END WHILE */
 
@@ -262,11 +289,11 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.NbrOfConversion = 5;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
@@ -292,6 +319,38 @@ static void MX_ADC1_Init(void)
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_6;
+  sConfig.Rank = ADC_REGULAR_RANK_2;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_7;
+  sConfig.Rank = ADC_REGULAR_RANK_3;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_8;
+  sConfig.Rank = ADC_REGULAR_RANK_4;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_10;
+  sConfig.Rank = ADC_REGULAR_RANK_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
