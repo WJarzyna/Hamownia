@@ -210,7 +210,7 @@ void Error_Handler(void);
 #define XL_INT_Pin GPIO_PIN_1
 #define XL_INT_GPIO_Port GPIOE
 /* USER CODE BEGIN Private defines */
-
+#define MIN_ENC_T 20
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

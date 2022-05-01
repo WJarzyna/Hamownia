@@ -43,6 +43,8 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
+CRC_HandleTypeDef hcrc;
+
 I2C_HandleTypeDef hi2c2;
 
 LCD_HandleTypeDef hlcd;
@@ -75,6 +77,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM17_Init(void);
+static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -113,6 +116,26 @@ void set_ADC_channel( ADC_HandleTypeDef *hadc, uint32_t channel )
      BSP_LCD_GLASS_DisplayString("Error");
      while(1);
     }
+}
+
+void HAL_GPIO_EXTI_Callback( uint16_t pin )
+{
+	static uint8_t state;
+	static uint32_t t;
+
+	if( t - HAL_GetTick() > MIN_ENC_T )
+	{
+		state &= 0x0F;
+		state = HAL_GPIO_ReadPin(ENC_1_GPIO_Port, ENC_1_Pin) + (HAL_GPIO_ReadPin(ENC_2_GPIO_Port, ENC_2_Pin) << 1) + (state << 4);
+
+		switch( state )
+		{
+		case 0x10: HAL_UART_Transmit_IT(&huart2, "Lewo \n", 7); break;
+		case 0x20: HAL_UART_Transmit_IT(&huart2, "Prawo\n", 7);; break;
+		default: break;
+		}
+	}
+	t = HAL_GetTick();
 }
 /* USER CODE END 0 */
 
@@ -153,6 +176,7 @@ int main(void)
   MX_ADC1_Init();
   MX_TIM4_Init();
   MX_TIM17_Init();
+  MX_CRC_Init();
   /* USER CODE BEGIN 2 */
   BSP_LCD_GLASS_Init();
   BSP_LCD_GLASS_Clear();
@@ -162,6 +186,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   HAL_UART_Init( &huart2 );
   HAL_ADC_Init(&hadc1);
+  HAL_CRC_Init(&hcrc);
 
   uint32_t val = 0;
   uint8_t text[8];
@@ -180,7 +205,7 @@ int main(void)
 
 
 	  HAL_ADC_Start(&hadc1);
-	  while(HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK);
+	  HAL_ADC_PollForConversion(&hadc1, 10);
 	  val = HAL_ADC_GetValue(&hadc1);
 	  sprintf( (char*)text, "%1.3f%1d", 3.3*((float)val/4096.0), channel+5);
 	  BSP_LCD_GLASS_DisplayString(text);
@@ -358,6 +383,39 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CRC_Init(void)
+{
+
+  /* USER CODE BEGIN CRC_Init 0 */
+
+  /* USER CODE END CRC_Init 0 */
+
+  /* USER CODE BEGIN CRC_Init 1 */
+
+  /* USER CODE END CRC_Init 1 */
+  hcrc.Instance = CRC;
+  hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_DISABLE;
+  hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
+  hcrc.Init.GeneratingPolynomial = 79764919;
+  hcrc.Init.CRCLength = CRC_POLYLENGTH_32B;
+  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
+  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
+  hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+  if (HAL_CRC_Init(&hcrc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CRC_Init 2 */
+
+  /* USER CODE END CRC_Init 2 */
 
 }
 
@@ -797,7 +855,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : ENC_1_Pin */
   GPIO_InitStruct.Pin = ENC_1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(ENC_1_GPIO_Port, &GPIO_InitStruct);
 
