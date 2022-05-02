@@ -84,24 +84,19 @@ static void MX_CRC_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-uint32_t crc32( uint8_t* data )
-{
-   int j;
-   uint32_t checksum = 0xFFFFFFFF, mask;
-   uint8_t byte;
+volatile uint8_t enc_state;
+enum enc_event {NOP, BUTTON, LEFT, RIGHT};
 
-   for( unsigned i = 0; data[i] != '\0'; ++i )
-   {
-      byte = data[i];
-      checksum = checksum ^ byte;
-      for (j = 7; j >= 0; --j)
-      {
-         mask = -(checksum & 1);
-         checksum = (checksum >> 1) ^ (0xEDB88320 & mask);
-      }
-   }
-   return ~checksum;
-}
+#define BYTE_TO_BINARY(byte)  \
+  (byte & 0x80 ? '1' : '0'), \
+  (byte & 0x40 ? '1' : '0'), \
+  (byte & 0x20 ? '1' : '0'), \
+  (byte & 0x10 ? '1' : '0'), \
+  (byte & 0x08 ? '1' : '0'), \
+  (byte & 0x04 ? '1' : '0'), \
+  (byte & 0x02 ? '1' : '0'), \
+  (byte & 0x01 ? '1' : '0')
+
 
 void set_ADC_channel( ADC_HandleTypeDef *hadc, uint32_t channel )
 {
@@ -122,16 +117,24 @@ void HAL_GPIO_EXTI_Callback( uint16_t pin )
 {
 	static uint8_t state;
 	static uint32_t t;
+	uint8_t msg[26];
 
 	if( t - HAL_GetTick() > MIN_ENC_T )
 	{
 		state &= 0x0F;
-		state = HAL_GPIO_ReadPin(ENC_1_GPIO_Port, ENC_1_Pin) + (HAL_GPIO_ReadPin(ENC_2_GPIO_Port, ENC_2_Pin) << 1) + (state << 4);
+		state = HAL_GPIO_ReadPin(ENC_1_GPIO_Port, ENC_1_Pin) \
+				+ (HAL_GPIO_ReadPin(ENC_2_GPIO_Port, ENC_2_Pin) << 1) \
+				+ (HAL_GPIO_ReadPin(ENC_BT_GPIO_Port, ENC_BT_Pin) << 2) \
+				+ (state << 4);
 
 		switch( state )
 		{
-		case 0x10: HAL_UART_Transmit_IT(&huart2, "Lewo \n", 7); break;
-		case 0x20: HAL_UART_Transmit_IT(&huart2, "Prawo\n", 7);; break;
+		case 0x54: enc_state = LEFT; break;
+		case 0x64: enc_state = RIGHT; break;
+		case 0x73: enc_state = BUTTON; break;
+		case 0x63: enc_state = BUTTON; break;
+		case 0x53: enc_state = BUTTON; break;
+		case 0x43: enc_state = BUTTON; break;
 		default: break;
 		}
 	}
@@ -188,27 +191,49 @@ int main(void)
   HAL_ADC_Init(&hadc1);
   HAL_CRC_Init(&hcrc);
 
+  enc_state = 0;
+
   uint32_t val = 0;
   uint8_t text[8];
   uint32_t channels[5] = { ADC_CHANNEL_5, ADC_CHANNEL_6, ADC_CHANNEL_7, ADC_CHANNEL_8, ADC_CHANNEL_10};
-  uint8_t channel = 0;
+  uint8_t channel = 0, flag = 0;
+  const char* entries[5] = {
+	" 5 Kanal ",
+	" 6 Kanal ",
+	" 7 Kanal ",
+	" 8 Kanal ",
+	"10 Kanal "};
 
   while (1)
   {
-	  if( HAL_GPIO_ReadPin(ENC_BT_GPIO_Port, ENC_BT_Pin) == 0 )
+	  while( !flag )
 	  {
-		  ++channel;
-		  if( channel > 4 ) channel = 0;
-		  set_ADC_channel(&hadc1, channels[channel]);
-		  while( HAL_GPIO_ReadPin(ENC_BT_GPIO_Port, ENC_BT_Pin) == 0 );
+		 BSP_LCD_GLASS_ScrollSentence( entries[channel], 1, 100);
+		 while( !enc_state );
+		 switch( enc_state )
+		 {
+		 case NOP: break;
+		 case BUTTON: flag = 1; break;
+		 case LEFT: --channel; break;
+		 case RIGHT: ++channel; break;
+		 default: break;
+		 }
+		 if( channel > 4 ) channel = 0;
+		 enc_state = NOP;
 	  }
+	  flag = 0;
+	  while( enc_state );
+	  while( enc_state != BUTTON )
+	  {
+		  set_ADC_channel(&hadc1, channels[channel]);
 
-
-	  HAL_ADC_Start(&hadc1);
-	  HAL_ADC_PollForConversion(&hadc1, 10);
-	  val = HAL_ADC_GetValue(&hadc1);
-	  sprintf( (char*)text, "%1.3f%1d", 3.3*((float)val/4096.0), channel+5);
-	  BSP_LCD_GLASS_DisplayString(text);
+		  HAL_ADC_Start(&hadc1);
+		  HAL_ADC_PollForConversion(&hadc1, 10);
+		  val = HAL_ADC_GetValue(&hadc1);
+		  sprintf( (char*)text, "%1.3fV", 3.3*((float)val/4096.0));
+		  BSP_LCD_GLASS_DisplayString(text);
+	  }
+	  enc_state = NOP;
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
