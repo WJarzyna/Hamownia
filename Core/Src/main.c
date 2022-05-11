@@ -42,6 +42,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+DMA_HandleTypeDef hdma_adc1;
 
 CRC_HandleTypeDef hcrc;
 
@@ -68,6 +69,7 @@ UART_HandleTypeDef huart2;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_LCD_Init(void);
 static void MX_QUADSPI_Init(void);
@@ -85,57 +87,39 @@ static void MX_CRC_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 volatile uint8_t enc_state;
-enum enc_event {NOP, BUTTON, LEFT, RIGHT};
-
-#define BYTE_TO_BINARY(byte)  \
-  (byte & 0x80 ? '1' : '0'), \
-  (byte & 0x40 ? '1' : '0'), \
-  (byte & 0x20 ? '1' : '0'), \
-  (byte & 0x10 ? '1' : '0'), \
-  (byte & 0x08 ? '1' : '0'), \
-  (byte & 0x04 ? '1' : '0'), \
-  (byte & 0x02 ? '1' : '0'), \
-  (byte & 0x01 ? '1' : '0')
-
-
-void set_ADC_channel( ADC_HandleTypeDef *hadc, uint32_t channel )
-{
-  ADC_ChannelConfTypeDef c_config;
-  c_config.Channel = channel;
-  c_config.Rank = ADC_REGULAR_RANK_1;
-  c_config.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
-
-  if (HAL_ADC_ConfigChannel(hadc, &c_config) != HAL_OK)
-    {
-     BSP_LCD_GLASS_Clear();
-     BSP_LCD_GLASS_DisplayString("Error");
-     while(1);
-    }
-}
+volatile uint8_t butt_state;
+enum enc_event { NOP, BUTTON, LEFT, RIGHT};
+enum adc_ch { I_STATOR, TORQ_SENS, V_OUT, I_ROTOR};
 
 void HAL_GPIO_EXTI_Callback( uint16_t pin )
 {
-	static uint8_t state;
+	static uint8_t state, butt_state;
 	static uint32_t t;
-	uint8_t msg[26];
 
 	if( t - HAL_GetTick() > MIN_ENC_T )
 	{
-		state &= 0x0F;
-		state = HAL_GPIO_ReadPin(ENC_1_GPIO_Port, ENC_1_Pin) \
-				+ (HAL_GPIO_ReadPin(ENC_2_GPIO_Port, ENC_2_Pin) << 1) \
-				+ (HAL_GPIO_ReadPin(ENC_BT_GPIO_Port, ENC_BT_Pin) << 2) \
-				+ (state << 4);
-
-		switch( state )
+		if( pin == GPIO_PIN_0 )
 		{
-		case 0x54: enc_state = LEFT; break;
-		case 0x64: enc_state = RIGHT; break;
-		case 0x73: enc_state = BUTTON; break;
-		case 0x63: enc_state = BUTTON; break;
-		case 0x53: enc_state = BUTTON; break;
-		case 0x43: enc_state = BUTTON; break;
-		default: break;
+			if( !HAL_GPIO_ReadPin(ENC_BT_GPIO_Port, ENC_BT_Pin) )
+			{
+				if( butt_state == 1 ) enc_state = BUTTON;
+				butt_state = 0;
+			}
+			else butt_state = 1;
+		}
+		else
+		{
+			state &= 0x0F;
+			state = HAL_GPIO_ReadPin(ENC_1_GPIO_Port, ENC_1_Pin) \
+					+ (HAL_GPIO_ReadPin(ENC_2_GPIO_Port, ENC_2_Pin) << 1) \
+					+ (state << 4);
+
+			switch( state )
+			{
+			case 0x10: enc_state = LEFT; break;
+			case 0x20: enc_state = RIGHT; break;
+			default: break;
+			}
 		}
 	}
 	t = HAL_GetTick();
@@ -170,6 +154,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_I2C2_Init();
   MX_LCD_Init();
   MX_QUADSPI_Init();
@@ -191,18 +176,20 @@ int main(void)
   HAL_ADC_Init(&hadc1);
   HAL_CRC_Init(&hcrc);
 
+  HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
+
+  uint32_t adc_data[4];
+  HAL_ADC_Start_DMA(&hadc1, adc_data, 4);
+
   enc_state = 0;
 
-  uint32_t val = 0;
   uint8_t text[8];
-  uint32_t channels[5] = { ADC_CHANNEL_5, ADC_CHANNEL_6, ADC_CHANNEL_7, ADC_CHANNEL_8, ADC_CHANNEL_10};
   uint8_t channel = 0, flag = 0;
-  const char* entries[5] = {
-	" 5 Kanal ",
-	" 6 Kanal ",
-	" 7 Kanal ",
-	" 8 Kanal ",
-	"10 Kanal "};
+  const char* entries[4] = {
+	" Prad statora ",
+	" Czujnik momentu ",
+	" Napiecie statora ",
+	" Prad rotora " };
 
   while (1)
   {
@@ -218,19 +205,17 @@ int main(void)
 		 case RIGHT: ++channel; break;
 		 default: break;
 		 }
-		 if( channel > 4 ) channel = 0;
+		 if( channel > 3 ) channel = 0;
 		 enc_state = NOP;
 	  }
+
 	  flag = 0;
+
 	  while( enc_state );
 	  while( enc_state != BUTTON )
 	  {
-		  set_ADC_channel(&hadc1, channels[channel]);
 
-		  HAL_ADC_Start(&hadc1);
-		  HAL_ADC_PollForConversion(&hadc1, 10);
-		  val = HAL_ADC_GetValue(&hadc1);
-		  sprintf( (char*)text, "%1.3fV", 3.3*((float)val/4096.0));
+		  sprintf( (char*)text, "%1.3fV", 3.3*((float)adc_data[channel]/4096.0));
 		  BSP_LCD_GLASS_DisplayString(text);
 	  }
 	  enc_state = NOP;
@@ -340,14 +325,14 @@ static void MX_ADC1_Init(void)
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 5;
+  hadc1.Init.ContinuousConvMode = ENABLE;
+  hadc1.Init.NbrOfConversion = 4;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
   hadc1.Init.OversamplingMode = DISABLE;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
@@ -363,9 +348,9 @@ static void MX_ADC1_Init(void)
   }
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_5;
+  sConfig.Channel = ADC_CHANNEL_6;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_92CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
@@ -375,7 +360,7 @@ static void MX_ADC1_Init(void)
   }
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_6;
+  sConfig.Channel = ADC_CHANNEL_7;
   sConfig.Rank = ADC_REGULAR_RANK_2;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
@@ -383,7 +368,7 @@ static void MX_ADC1_Init(void)
   }
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_7;
+  sConfig.Channel = ADC_CHANNEL_8;
   sConfig.Rank = ADC_REGULAR_RANK_3;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
@@ -391,16 +376,8 @@ static void MX_ADC1_Init(void)
   }
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_8;
-  sConfig.Rank = ADC_REGULAR_RANK_4;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /** Configure Regular Channel
-  */
   sConfig.Channel = ADC_CHANNEL_10;
-  sConfig.Rank = ADC_REGULAR_RANK_5;
+  sConfig.Rank = ADC_REGULAR_RANK_4;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -822,6 +799,22 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -907,7 +900,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : ENC_BT_Pin */
   GPIO_InitStruct.Pin = ENC_BT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(ENC_BT_GPIO_Port, &GPIO_InitStruct);
 

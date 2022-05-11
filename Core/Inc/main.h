@@ -78,8 +78,6 @@ void Error_Handler(void);
 #define MAG_DRDY_GPIO_Port GPIOC
 #define VLCD_Pin GPIO_PIN_3
 #define VLCD_GPIO_Port GPIOC
-#define I_ROTOR_Pin GPIO_PIN_0
-#define I_ROTOR_GPIO_Port GPIOA
 #define I_STATOR_Pin GPIO_PIN_1
 #define I_STATOR_GPIO_Port GPIOA
 #define TORQ_SENSOR_Pin GPIO_PIN_2
@@ -88,8 +86,8 @@ void Error_Handler(void);
 #define V_OUT_GPIO_Port GPIOA
 #define MFX_WAKEUP_Pin GPIO_PIN_4
 #define MFX_WAKEUP_GPIO_Port GPIOA
-#define I_MOTOR_Pin GPIO_PIN_5
-#define I_MOTOR_GPIO_Port GPIOA
+#define I_ROTOR_Pin GPIO_PIN_5
+#define I_ROTOR_GPIO_Port GPIOA
 #define SEG23_Pin GPIO_PIN_6
 #define SEG23_GPIO_Port GPIOA
 #define SEG0_Pin GPIO_PIN_7
