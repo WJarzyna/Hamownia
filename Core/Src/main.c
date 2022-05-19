@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
+#include "stm32l476g_discovery_glass_lcd.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,6 +59,7 @@ SAI_HandleTypeDef hsai_BlockB1;
 SPI_HandleTypeDef hspi2;
 
 TIM_HandleTypeDef htim4;
+TIM_HandleTypeDef htim16;
 TIM_HandleTypeDef htim17;
 
 UART_HandleTypeDef huart2;
@@ -80,6 +82,7 @@ static void MX_ADC1_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM17_Init(void);
 static void MX_CRC_Init(void);
+static void MX_TIM16_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -87,9 +90,10 @@ static void MX_CRC_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 volatile uint8_t enc_state;
-volatile uint8_t butt_state;
+volatile uint32_t pulse_t;
+
 enum enc_event { NOP, BUTTON, LEFT, RIGHT};
-enum adc_ch { I_STATOR, TORQ_SENS, V_OUT, I_ROTOR};
+enum adc_ch { I_STATOR, TORQ_SENS, V_OUT, I_ROTOR, PWM_ROTOR, SPEED_IN};
 
 void HAL_GPIO_EXTI_Callback( uint16_t pin )
 {
@@ -124,6 +128,87 @@ void HAL_GPIO_EXTI_Callback( uint16_t pin )
 	}
 	t = HAL_GetTick();
 }
+
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
+{
+	if( htim == &htim4 )
+	{
+		pulse_t = HAL_TIM_ReadCapturedValue( htim, TIM_CHANNEL_1);
+		__HAL_TIM_SET_COUNTER( htim, 0);
+	}
+}
+
+void HAL_TIM_PeriodElapsedCallback( TIM_HandleTypeDef *htim )
+{
+	uint8_t out_msg[256];
+	uint32_t crc, out_msg_len;
+
+	if( htim == &htim4 )
+	{
+		pulse_t = 0;
+	}
+	else if( htim == &htim16 )
+	{
+		out_msg_len = sprintf( (char*)out_msg, "0:%u,%u,%1.3f,%1.3f,%1.3f,%1.3f:", 0,0,0.0,0.0,0.0,0.0 );
+		crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)out_msg, out_msg_len);
+		out_msg_len = sprintf( (char*)out_msg, "%s%lu\n", out_msg, crc );
+		HAL_UART_Transmit_IT(&huart2, out_msg, out_msg_len);
+	}
+}
+
+void lcd_put_v( float voltage )
+{
+	uint8_t text[8];
+
+	sprintf( (char*)text, "%1.3fV", voltage );
+	BSP_LCD_GLASS_DisplayString(text);
+}
+
+void lcd_put_speed( uint32_t rpm )
+{
+	uint8_t text[8];
+
+	sprintf( (char*)text, "%5lu", rpm );
+	BSP_LCD_GLASS_DisplayString(text);
+}
+
+void manual_PWM( void )
+{
+	uint8_t text[8];
+	static int32_t pwm = 0;
+
+	switch( enc_state )
+	{
+	case LEFT: ++pwm; break;
+	case RIGHT: --pwm; break;
+	default: break;
+	}
+	enc_state = NOP;
+
+	if( pwm < 0 ) pwm = 0;
+	pwm %= 101;
+	__HAL_TIM_SET_COMPARE( &htim17, TIM_CHANNEL_1, pwm*655 );
+
+	sprintf( (char*)text, "%3lu", pwm );
+	BSP_LCD_GLASS_DisplayString(text);
+}
+
+void ADC_get_zero_points( uint32_t adc_data[], uint32_t adc_zero[] )
+{
+	for( unsigned i = 0; i < 4; ++i )
+	{
+		adc_zero[i] = 0;
+
+		for( unsigned j = 0; j < 1000; ++j )
+		{
+			HAL_Delay(5);
+			adc_zero[i] += adc_data[i];
+		}
+		adc_zero[i] /= 1000;
+
+		lcd_put_v( 3.3*((float)adc_zero[i]/4096.0) );
+	}
+}
 /* USER CODE END 0 */
 
 /**
@@ -133,7 +218,20 @@ void HAL_GPIO_EXTI_Callback( uint16_t pin )
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+	enc_state = 0;
+	pulse_t = 0;
 
+	uint8_t channel = 0, flag = 0;
+	const char* entries[] = {
+			" Prad statora ",
+			" Czujnik momentu ",
+			" Napiecie statora ",
+			" Prad rotora ",
+			" Regulator pradu rotora ",
+			" Pomiar predkosci "};
+
+	uint32_t adc_data[4];
+	uint32_t adc_zero[4];
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -165,37 +263,31 @@ int main(void)
   MX_TIM4_Init();
   MX_TIM17_Init();
   MX_CRC_Init();
+  MX_TIM16_Init();
   /* USER CODE BEGIN 2 */
   BSP_LCD_GLASS_Init();
-  BSP_LCD_GLASS_Clear();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  HAL_UART_Init( &huart2 );
-  HAL_ADC_Init(&hadc1);
-  HAL_CRC_Init(&hcrc);
+  HAL_TIMEx_PWMN_Start(&htim17, TIM_CHANNEL_1);
+  HAL_TIM_Base_Start_IT(&htim4);
+  HAL_TIM_IC_Start_IT(&htim4, TIM_CHANNEL_1);
+  HAL_TIM_Base_Start_IT(&htim16);
 
   HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
-
-  uint32_t adc_data[4];
   HAL_ADC_Start_DMA(&hadc1, adc_data, 4);
 
-  enc_state = 0;
+  BSP_LCD_GLASS_Clear();
 
-  uint8_t text[8];
-  uint8_t channel = 0, flag = 0;
-  const char* entries[4] = {
-	" Prad statora ",
-	" Czujnik momentu ",
-	" Napiecie statora ",
-	" Prad rotora " };
+  HAL_Delay(200);
+  ADC_get_zero_points( adc_data, adc_zero);
 
   while (1)
   {
 	  while( !flag )
 	  {
-		 BSP_LCD_GLASS_ScrollSentence( entries[channel], 1, 100);
+		 BSP_LCD_GLASS_ScrollSentence( (uint8_t*) entries[channel], 1, 100);
 		 while( !enc_state );
 		 switch( enc_state )
 		 {
@@ -205,18 +297,22 @@ int main(void)
 		 case RIGHT: ++channel; break;
 		 default: break;
 		 }
-		 if( channel > 3 ) channel = 0;
+		 channel %= 6;
 		 enc_state = NOP;
 	  }
 
 	  flag = 0;
+	  BSP_LCD_GLASS_Clear();
 
 	  while( enc_state );
 	  while( enc_state != BUTTON )
 	  {
-
-		  sprintf( (char*)text, "%1.3fV", 3.3*((float)adc_data[channel]/4096.0));
-		  BSP_LCD_GLASS_DisplayString(text);
+		  switch( channel )
+		  {
+		  case SPEED_IN: lcd_put_speed( pulse_t ); break;
+		  case PWM_ROTOR: manual_PWM(); break;
+		  default: lcd_put_v( 3.3*(((float)adc_data[channel]-(float)adc_zero[channel])/4096.0) ); break;
+		  }
 	  }
 	  enc_state = NOP;
     /* USER CODE END WHILE */
@@ -404,10 +500,8 @@ static void MX_CRC_Init(void)
 
   /* USER CODE END CRC_Init 1 */
   hcrc.Instance = CRC;
-  hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_DISABLE;
+  hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_ENABLE;
   hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
-  hcrc.Init.GeneratingPolynomial = 79764919;
-  hcrc.Init.CRCLength = CRC_POLYLENGTH_32B;
   hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
   hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
   hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
@@ -672,7 +766,7 @@ static void MX_TIM4_Init(void)
 
   /* USER CODE END TIM4_Init 1 */
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 0;
+  htim4.Init.Prescaler = 1999;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim4.Init.Period = 65535;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -687,7 +781,7 @@ static void MX_TIM4_Init(void)
   {
     Error_Handler();
   }
-  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_FALLING;
   sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
   sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
   sConfigIC.ICFilter = 0;
@@ -698,6 +792,38 @@ static void MX_TIM4_Init(void)
   /* USER CODE BEGIN TIM4_Init 2 */
 
   /* USER CODE END TIM4_Init 2 */
+
+}
+
+/**
+  * @brief TIM16 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM16_Init(void)
+{
+
+  /* USER CODE BEGIN TIM16_Init 0 */
+
+  /* USER CODE END TIM16_Init 0 */
+
+  /* USER CODE BEGIN TIM16_Init 1 */
+
+  /* USER CODE END TIM16_Init 1 */
+  htim16.Instance = TIM16;
+  htim16.Init.Prescaler = 600;
+  htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim16.Init.Period = 65535;
+  htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim16.Init.RepetitionCounter = 0;
+  htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim16) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM16_Init 2 */
+
+  /* USER CODE END TIM16_Init 2 */
 
 }
 
@@ -720,7 +846,7 @@ static void MX_TIM17_Init(void)
 
   /* USER CODE END TIM17_Init 1 */
   htim17.Instance = TIM17;
-  htim17.Init.Prescaler = 0;
+  htim17.Init.Prescaler = 1;
   htim17.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim17.Init.Period = 65535;
   htim17.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
