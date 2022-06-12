@@ -18,12 +18,16 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
+#include <data_acq.h>
+#include <quadspi.h>
 #include "main.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
+#include <user.h>
+
 #include "stm32l476g_discovery_glass_lcd.h"
 /* USER CODE END Includes */
 
@@ -34,6 +38,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -65,7 +70,11 @@ TIM_HandleTypeDef htim17;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+volatile uint32_t adc_data[4];
+volatile uint32_t adc_raw[N_SAMPLES*4];
+volatile uint32_t adc_zero[4];
+volatile uint8_t enc_state;
+volatile uint32_t pulse_t;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -89,126 +98,7 @@ static void MX_TIM16_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-volatile uint8_t enc_state;
-volatile uint32_t pulse_t;
 
-enum enc_event { NOP, BUTTON, LEFT, RIGHT};
-enum adc_ch { I_STATOR, TORQ_SENS, V_OUT, I_ROTOR, PWM_ROTOR, SPEED_IN};
-
-void HAL_GPIO_EXTI_Callback( uint16_t pin )
-{
-	static uint8_t state, butt_state;
-	static uint32_t t;
-
-	if( t - HAL_GetTick() > MIN_ENC_T )
-	{
-		if( pin == GPIO_PIN_0 )
-		{
-			if( !HAL_GPIO_ReadPin(ENC_BT_GPIO_Port, ENC_BT_Pin) )
-			{
-				if( butt_state == 1 ) enc_state = BUTTON;
-				butt_state = 0;
-			}
-			else butt_state = 1;
-		}
-		else
-		{
-			state &= 0x0F;
-			state = HAL_GPIO_ReadPin(ENC_1_GPIO_Port, ENC_1_Pin) \
-					+ (HAL_GPIO_ReadPin(ENC_2_GPIO_Port, ENC_2_Pin) << 1) \
-					+ (state << 4);
-
-			switch( state )
-			{
-			case 0x10: enc_state = LEFT; break;
-			case 0x20: enc_state = RIGHT; break;
-			default: break;
-			}
-		}
-	}
-	t = HAL_GetTick();
-}
-
-void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
-{
-	if( htim == &htim4 )
-	{
-		pulse_t = HAL_TIM_ReadCapturedValue( htim, TIM_CHANNEL_1);
-		__HAL_TIM_SET_COUNTER( htim, 0);
-	}
-}
-
-void HAL_TIM_PeriodElapsedCallback( TIM_HandleTypeDef *htim )
-{
-	uint8_t out_msg[256];
-	uint32_t crc, out_msg_len;
-
-	if( htim == &htim4 )
-	{
-		pulse_t = 0;
-	}
-	else if( htim == &htim16 )
-	{
-		out_msg_len = sprintf( (char*)out_msg, "0:%u,%u,%1.3f,%1.3f,%1.3f,%1.3f:", 0,0,0.0,0.0,0.0,0.0 );
-		crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)out_msg, out_msg_len);
-		out_msg_len = sprintf( (char*)out_msg, "%s%lu\n", out_msg, crc );
-		HAL_UART_Transmit_IT(&huart2, out_msg, out_msg_len);
-	}
-}
-
-void lcd_put_v( float voltage )
-{
-	uint8_t text[8];
-
-	sprintf( (char*)text, "%1.3fV", voltage );
-	BSP_LCD_GLASS_DisplayString(text);
-}
-
-void lcd_put_speed( uint32_t rpm )
-{
-	uint8_t text[8];
-
-	sprintf( (char*)text, "%5lu", rpm );
-	BSP_LCD_GLASS_DisplayString(text);
-}
-
-void manual_PWM( void )
-{
-	uint8_t text[8];
-	static int32_t pwm = 0;
-
-	switch( enc_state )
-	{
-	case LEFT: ++pwm; break;
-	case RIGHT: --pwm; break;
-	default: break;
-	}
-	enc_state = NOP;
-
-	if( pwm < 0 ) pwm = 0;
-	pwm %= 101;
-	__HAL_TIM_SET_COMPARE( &htim17, TIM_CHANNEL_1, pwm*655 );
-
-	sprintf( (char*)text, "%3lu", pwm );
-	BSP_LCD_GLASS_DisplayString(text);
-}
-
-void ADC_get_zero_points( uint32_t adc_data[], uint32_t adc_zero[] )
-{
-	for( unsigned i = 0; i < 4; ++i )
-	{
-		adc_zero[i] = 0;
-
-		for( unsigned j = 0; j < 1000; ++j )
-		{
-			HAL_Delay(5);
-			adc_zero[i] += adc_data[i];
-		}
-		adc_zero[i] /= 1000;
-
-		lcd_put_v( 3.3*((float)adc_zero[i]/4096.0) );
-	}
-}
 /* USER CODE END 0 */
 
 /**
@@ -221,17 +111,20 @@ int main(void)
 	enc_state = 0;
 	pulse_t = 0;
 
-	uint8_t channel = 0, flag = 0;
+	int choice = 0;
 	const char* entries[] = {
 			" Prad statora ",
 			" Czujnik momentu ",
 			" Napiecie statora ",
 			" Prad rotora ",
 			" Regulator pradu rotora ",
-			" Pomiar predkosci "};
+			" Pomiar predkosci ",
+			" Pomiar automatyczny ",
+			" Pomiar automatyczny do pliku ",
+			" Wyslij plik ",
+			" Wyczysc pamiec " };
 
-	uint32_t adc_data[4];
-	uint32_t adc_zero[4];
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -266,52 +159,40 @@ int main(void)
   MX_TIM16_Init();
   /* USER CODE BEGIN 2 */
   BSP_LCD_GLASS_Init();
+
+  if( HAL_TIMEx_PWMN_Start(&htim17, TIM_CHANNEL_1)  != HAL_OK ) Error_Handler();
+
+  BSP_LCD_GLASS_Clear();
+
+  if( init_data_acq() != HAL_OK ) Error_Handler();
+
+  if( CSP_QUADSPI_Init() != HAL_OK ) Error_Handler();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  HAL_TIMEx_PWMN_Start(&htim17, TIM_CHANNEL_1);
-  HAL_TIM_Base_Start_IT(&htim4);
-  HAL_TIM_IC_Start_IT(&htim4, TIM_CHANNEL_1);
-  HAL_TIM_Base_Start_IT(&htim16);
 
-  HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
-  HAL_ADC_Start_DMA(&hadc1, adc_data, 4);
-
-  BSP_LCD_GLASS_Clear();
-
-  HAL_Delay(200);
-  ADC_get_zero_points( adc_data, adc_zero);
 
   while (1)
   {
-	  while( !flag )
-	  {
-		 BSP_LCD_GLASS_ScrollSentence( (uint8_t*) entries[channel], 1, 100);
-		 while( !enc_state );
-		 switch( enc_state )
-		 {
-		 case NOP: break;
-		 case BUTTON: flag = 1; break;
-		 case LEFT: --channel; break;
-		 case RIGHT: ++channel; break;
-		 default: break;
-		 }
-		 channel %= 6;
-		 enc_state = NOP;
-	  }
-
-	  flag = 0;
-	  BSP_LCD_GLASS_Clear();
+	  choice = menu(entries, 10);
 
 	  while( enc_state );
 	  while( enc_state != BUTTON )
 	  {
-		  switch( channel )
+		  switch( choice )
 		  {
-		  case SPEED_IN: lcd_put_speed( pulse_t ); break;
+		  case SPEED_IN: lcd_put_speed( SPEED ); break;
 		  case PWM_ROTOR: manual_PWM(); break;
-		  default: lcd_put_v( 3.3*(((float)adc_data[channel]-(float)adc_zero[channel])/4096.0) ); break;
+		  case I_ROTOR: lcd_put_a( ROTOR_CURR );break;
+		  case I_STATOR: lcd_put_a( STATOR_CURR );break;
+		  case V_OUT: lcd_put_v( STATOR_V ); break;
+		  case AUTO_RUN: auto_run(); break;
+		  case TORQ_SENS: lcd_put_nm( TORQUE ); break;
+		  case FILE_RUN: auto_run_file(); break;
+		  case SEND_FILE: send_file(); break;
+		  case CLEAR_FLASH: destroy_all_evidence(); break;
+		  default: break;
 		  }
 	  }
 	  enc_state = NOP;
@@ -616,11 +497,11 @@ static void MX_QUADSPI_Init(void)
   /* USER CODE END QUADSPI_Init 1 */
   /* QUADSPI parameter configuration*/
   hqspi.Instance = QUADSPI;
-  hqspi.Init.ClockPrescaler = 255;
-  hqspi.Init.FifoThreshold = 1;
-  hqspi.Init.SampleShifting = QSPI_SAMPLE_SHIFTING_NONE;
-  hqspi.Init.FlashSize = 1;
-  hqspi.Init.ChipSelectHighTime = QSPI_CS_HIGH_TIME_1_CYCLE;
+  hqspi.Init.ClockPrescaler = 4;
+  hqspi.Init.FifoThreshold = 4;
+  hqspi.Init.SampleShifting = QSPI_SAMPLE_SHIFTING_HALFCYCLE;
+  hqspi.Init.FlashSize = 23;
+  hqspi.Init.ChipSelectHighTime = QSPI_CS_HIGH_TIME_6_CYCLE;
   hqspi.Init.ClockMode = QSPI_CLOCK_MODE_0;
   if (HAL_QSPI_Init(&hqspi) != HAL_OK)
   {
@@ -846,9 +727,9 @@ static void MX_TIM17_Init(void)
 
   /* USER CODE END TIM17_Init 1 */
   htim17.Instance = TIM17;
-  htim17.Init.Prescaler = 1;
+  htim17.Init.Prescaler = 20;
   htim17.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim17.Init.Period = 65535;
+  htim17.Init.Period = 5000;
   htim17.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim17.Init.RepetitionCounter = 0;
   htim17.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -931,12 +812,12 @@ static void MX_DMA_Init(void)
 {
 
   /* DMA controller clock enable */
-  __HAL_RCC_DMA1_CLK_ENABLE();
+  __HAL_RCC_DMA2_CLK_ENABLE();
 
   /* DMA interrupt init */
-  /* DMA1_Channel1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA2_Channel3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel3_IRQn);
 
 }
 
@@ -1081,7 +962,11 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-
+	__HAL_TIM_SET_COMPARE( &htim17, TIM_CHANNEL_1, 0 );
+	__disable_irq();
+	HAL_UART_Transmit(&huart2, "ErrorHandler\n", 14, 20);
+	BSP_LCD_GLASS_DisplayString("FATAL");
+	while(1);
   /* USER CODE END Error_Handler_Debug */
 }
 
