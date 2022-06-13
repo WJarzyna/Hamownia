@@ -20,7 +20,7 @@ enum adc_ch { I_STATOR, TORQ_SENS, V_OUT, I_ROTOR, PWM_ROTOR, SPEED_IN, AUTO_RUN
 #define ROTOR_CURR (-((float)adc_data[I_ROTOR]-(float)adc_zero[I_ROTOR])/271.75)
 #define STATOR_CURR (-((float)adc_data[I_STATOR]-(float)adc_zero[I_STATOR])/49.636)
 #define STATOR_V ((float)adc_data[V_OUT]-(float)adc_zero[V_OUT])/223.77
-#define TORQUE ((float)adc_data[TORQ_SENS]-(float)adc_zero[TORQ_SENS])/399.022
+#define TORQUE ((float)adc_data[TORQ_SENS]-(float)adc_zero[TORQ_SENS])/39.9022
 #define N_SAMPLES 500
 
 
@@ -31,6 +31,7 @@ extern volatile uint32_t pulse_t;
 extern volatile uint32_t adc_raw[N_SAMPLES*4];
 
 extern TIM_HandleTypeDef htim4;
+extern TIM_HandleTypeDef htim15;
 extern TIM_HandleTypeDef htim16;
 extern TIM_HandleTypeDef htim17;
 extern ADC_HandleTypeDef hadc1;
@@ -45,6 +46,6 @@ void HAL_GPIO_EXTI_Callback( uint16_t pin );
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim);
 void HAL_TIM_PeriodElapsedCallback( TIM_HandleTypeDef *htim );
 void ADC_get_zero_points();
-void HAL_ADC_ConvCpltCallback( ADC_HandleTypeDef *hadc );
+void moving_avg();
 
 #endif /* INC_DATA_ACQ_H_ */

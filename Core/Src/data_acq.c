@@ -13,6 +13,7 @@ HAL_StatusTypeDef init_data_acq()
 	if( HAL_TIM_IC_Start_IT(&htim4, TIM_CHANNEL_1) != HAL_OK ) return HAL_ERROR;
 
 	if( HAL_TIM_Base_Start_IT(&htim16) != HAL_OK ) return HAL_ERROR;
+	if( HAL_TIM_Base_Start_IT(&htim15) != HAL_OK ) return HAL_ERROR;
 
 	if( HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK ) return HAL_ERROR;
 	if( HAL_ADC_Start_DMA(&hadc1, adc_raw, N_SAMPLES*4) != HAL_OK ) return HAL_ERROR;
@@ -84,6 +85,7 @@ void HAL_TIM_PeriodElapsedCallback( TIM_HandleTypeDef *htim )
 		send_data( i++, SPEED, TORQUE, ROTOR_CURR, STATOR_CURR, STATOR_V);
 		i %= 7000;
 	}
+	else if( htim == &htim15 ) moving_avg();
 }
 
 void ADC_get_zero_points()
@@ -103,7 +105,7 @@ void ADC_get_zero_points()
 	}
 }
 
-void HAL_ADC_ConvCpltCallback( ADC_HandleTypeDef *hadc )
+void moving_avg()
 {
 	uint32_t aux_data[4] = {};
 	for( unsigned i = 0; i < N_SAMPLES*4; i+=4)

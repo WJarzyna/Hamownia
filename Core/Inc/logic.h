@@ -21,6 +21,7 @@
 extern ADC_HandleTypeDef hadc1;
 extern QSPI_HandleTypeDef hqspi;
 extern TIM_HandleTypeDef htim4;
+extern TIM_HandleTypeDef htim15;
 extern TIM_HandleTypeDef htim16;
 extern TIM_HandleTypeDef htim17;
 extern UART_HandleTypeDef huart2;
